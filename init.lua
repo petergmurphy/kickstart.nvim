@@ -98,6 +98,9 @@ vim.g.have_nerd_font = true
 -- NOTE: You can change these options as you wish!
 --  For more options, you can see `:help option-list`
 
+-- Yank to clipboard
+vim.opt.clipboard = 'unnamedplus'
+
 -- Make line numbers default
 vim.opt.number = true
 -- You can also add relative line numbers, to help with jumping.
@@ -280,13 +283,19 @@ require('lazy').setup({
       require('which-key').setup()
 
       -- Document existing key chains
-      require('which-key').register {
-        ['<leader>c'] = { name = '[C]ode', _ = 'which_key_ignore' },
-        ['<leader>d'] = { name = '[D]ocument', _ = 'which_key_ignore' },
-        ['<leader>r'] = { name = '[R]ename', _ = 'which_key_ignore' },
-        ['<leader>f'] = { name = '[F]ind', _ = 'which_key_ignore' },
-        ['<leader>g'] = { name = '[G]it', _ = 'which_key_ignore' },
-        ['<leader>w'] = { name = '[W]orkspace', _ = 'which_key_ignore' },
+      require('which-key').add {
+        { '<leader>c', group = '[C]ode' },
+        { '<leader>c_', hidden = true },
+        { '<leader>d', group = '[D]ocument' },
+        { '<leader>d_', hidden = true },
+        { '<leader>f', group = '[F]ind' },
+        { '<leader>f_', hidden = true },
+        { '<leader>g', group = '[G]it' },
+        { '<leader>g_', hidden = true },
+        { '<leader>r', group = '[R]ename' },
+        { '<leader>r_', hidden = true },
+        { '<leader>w', group = '[W]orkspace' },
+        { '<leader>w_', hidden = true },
       }
     end,
   },
@@ -367,13 +376,127 @@ require('lazy').setup({
 
       -- See `:help telescope.builtin`
       local builtin = require 'telescope.builtin'
+      local finders = require 'telescope.finders'
+      local make_entry = require 'telescope.make_entry'
+      local pickers = require 'telescope.pickers'
+      local sorters = require 'telescope.sorters'
+      local telescope_conf = require('telescope.config').values
+      local telescope_utils = require 'telescope.utils'
+
+      local function get_visual_selection()
+        return table.concat(vim.fn.getregion(vim.fn.getpos 'v', vim.fn.getpos '.', { type = vim.fn.mode() }), '\n')
+      end
+
+      -- Telescope's LSP symbol pickers in the installed version call
+      -- symbols_to_items without Neovim 0.11's required position encoding.
+      if not vim.g.telescope_symbols_to_items_position_encoding_patch then
+        local symbols_to_items = vim.lsp.util.symbols_to_items
+        if debug.getinfo(symbols_to_items, 'u').nparams >= 3 then
+          vim.lsp.util.symbols_to_items = function(symbols, bufnr, position_encoding)
+            return symbols_to_items(symbols, bufnr, position_encoding or 'utf-16')
+          end
+        end
+        vim.g.telescope_symbols_to_items_position_encoding_patch = true
+      end
+
+      local function lsp_workspace_symbol_search(opts)
+        opts = opts or {}
+        local bufnr = vim.api.nvim_get_current_buf()
+        local clients = vim.lsp.get_clients { method = 'workspace/symbol' }
+
+        if vim.tbl_isempty(clients) then
+          vim.cmd 'silent! LspStart'
+          vim.wait(1500, function()
+            clients = vim.lsp.get_clients { method = 'workspace/symbol' }
+            return not vim.tbl_isempty(clients)
+          end, 100)
+        end
+
+        if vim.tbl_isempty(clients) then
+          local active_client_names = vim
+            .iter(vim.lsp.get_clients())
+            :map(function(client)
+              return client.name
+            end)
+            :totable()
+          local active_clients = vim.tbl_isempty(active_client_names) and 'none' or table.concat(active_client_names, ', ')
+          local filetype = vim.bo[bufnr].filetype == '' and 'none' or vim.bo[bufnr].filetype
+
+          vim.notify(
+            ('No active workspace/symbol LSP client. Open a TypeScript/JavaScript project file first. Active LSPs: %s. Current filetype: %s.'):format(
+              active_clients,
+              filetype
+            ),
+            vim.log.levels.INFO
+          )
+          return
+        end
+
+        opts.bufnr = bufnr
+        pickers
+          .new(opts, {
+            prompt_title = opts.prompt_title or 'Find Workspace Symbols',
+            finder = finders.new_dynamic {
+              entry_maker = make_entry.gen_from_lsp_symbols(opts),
+              fn = function(prompt)
+                if prompt == '' then
+                  return {}
+                end
+
+                local symbols = {}
+                for _, client in ipairs(clients) do
+                  local response = client:request_sync('workspace/symbol', { query = prompt }, 1000, bufnr)
+                  local items = vim.lsp.util.symbols_to_items(
+                    response and response.result or {},
+                    bufnr,
+                    client.offset_encoding or 'utf-16'
+                  ) or {}
+                  vim.list_extend(symbols, items)
+                end
+
+                if opts.symbols then
+                  symbols = telescope_utils.filter_symbols(symbols, { symbols = opts.symbols }) or {}
+                end
+
+                return symbols
+              end,
+            },
+            previewer = telescope_conf.qflist_previewer(opts),
+            sorter = sorters.highlighter_only(opts),
+          })
+          :find()
+      end
+
+      -- Search only non-gitignored files
+      vim.keymap.set('n', '<leader>ff', function()
+        builtin.find_files {
+          find_command = { 'rg', '--files', '--hidden', '--follow', '-g', '!.git' },
+        }
+      end, { desc = '[F]ind [F]iles (respects .gitignore)' })
+
       vim.keymap.set('n', '<leader>fh', builtin.help_tags, { desc = '[F]ind [H]elp' })
       vim.keymap.set('n', '<leader>fk', builtin.keymaps, { desc = '[F]ind [K]eymaps' })
-      vim.keymap.set('n', '<leader>ff', builtin.find_files, { desc = '[F]ind [F]iles' })
+      vim.keymap.set('n', '<leader>fa', function()
+        builtin.find_files {
+          find_command = { 'rg', '--files', '--hidden', '--follow', '--no-ignore', '-g', '!.git' },
+        }
+      end, { desc = '[F]ind [A]ll files' })
       vim.keymap.set('n', '<leader><leader>', builtin.find_files, { desc = 'Find Files' })
       vim.keymap.set('n', '<leader>fs', builtin.builtin, { desc = '[F]ind [S]elect Telescope' })
       vim.keymap.set('n', '<leader>fw', builtin.grep_string, { desc = '[F]ind current [W]ord' })
+      vim.keymap.set('v', 'g/', function()
+        builtin.grep_string { search = get_visual_selection() }
+      end, { desc = 'Find selected text globally' })
       vim.keymap.set('n', '<leader>fg', builtin.live_grep, { desc = '[F]ind by [G]rep' })
+      vim.keymap.set('n', '<leader>fc', function()
+        lsp_workspace_symbol_search {
+          prompt_title = 'Find Classes / Types',
+          symbols = { 'class', 'interface', 'struct', 'enum', 'typeParameter' },
+        }
+      end, { desc = '[F]ind [C]lasses / Types' })
+      vim.keymap.set('n', '<leader>fS', function()
+        lsp_workspace_symbol_search { prompt_title = 'Find Workspace Symbols' }
+      end, { desc = '[F]ind Workspace [S]ymbols' })
       vim.keymap.set('n', '<leader>fd', builtin.diagnostics, { desc = '[F]ind [D]iagnostics' })
       vim.keymap.set('n', '<leader>fr', builtin.resume, { desc = '[F]ind [R]esume' })
       vim.keymap.set('n', '<leader>f.', builtin.oldfiles, { desc = '[F]ind Recent Files ("." for repeat)' })
@@ -551,6 +674,8 @@ require('lazy').setup({
         -- But for many setups, the LSP (`tsserver`) will work just fine
         -- tsserver = {},
         --
+        ts_ls = {},
+        jdtls = {},
 
         lua_ls = {
           -- cmd = {...},
@@ -601,20 +726,36 @@ require('lazy').setup({
 
   { -- Autoformat
     'stevearc/conform.nvim',
+    keys = {
+      {
+        '<leader>cf',
+        function()
+          require('conform').format { async = true, lsp_format = 'fallback' }
+        end,
+        mode = { 'n', 'v' },
+        desc = '[C]ode [F]ormat',
+      },
+    },
     opts = {
       notify_on_error = false,
+      default_format_opts = {
+        lsp_format = 'fallback',
+      },
       format_on_save = function(bufnr)
-        -- Disable "format_on_save lsp_fallback" for languages that don't
+        -- Disable format-on-save LSP fallback for languages that don't
         -- have a well standardized coding style. You can add additional
         -- languages here or re-enable it for the disabled ones.
         local disable_filetypes = { c = true, cpp = true }
         return {
           timeout_ms = 500,
-          lsp_fallback = not disable_filetypes[vim.bo[bufnr].filetype],
+          lsp_format = disable_filetypes[vim.bo[bufnr].filetype] and 'never' or 'fallback',
         }
       end,
       formatters_by_ft = {
         lua = { 'stylua' },
+        -- Used when no filetype-specific formatter is configured.
+        -- Change this to set your default formatter, e.g. { 'prettier' }.
+        ['_'] = {},
         -- Conform can also run multiple formatters sequentially
         -- python = { "isort", "black" },
         --

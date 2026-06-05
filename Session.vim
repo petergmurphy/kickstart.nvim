@@ -13,13 +13,30 @@ if &shortmess =~ 'A'
 else
   set shortmess=aoO
 endif
-badd +1 lua/custom/plugins/obsession.lua
-badd +13 doc/kickstart.txt
-badd +24 lua/custom/plugins/bufferline.lua
-badd +3 lua/custom/plugins/neotree.lua
+badd +1 ~/.config/nvim/lazy-lock.json_hidden_message
+badd +214 README.md
+badd +379 init.lua
 argglobal
 %argdel
-$argadd ~/.config/nvim
+edit init.lua
+argglobal
+balt README.md
+setlocal foldmethod=manual
+setlocal foldexpr=v:lua.vim.treesitter.foldexpr()
+setlocal foldmarker={{{,}}}
+setlocal foldignore=#
+setlocal foldlevel=0
+setlocal foldminlines=1
+setlocal foldnestmax=20
+setlocal foldenable
+silent! normal! zE
+let &fdl = &fdl
+let s:l = 379 - ((24 * winheight(0) + 19) / 39)
+if s:l < 1 | let s:l = 1 | endif
+keepjumps exe s:l
+normal! zt
+keepjumps 379
+normal! 0
 tabnext 1
 if exists('s:wipebuf') && len(win_findbuf(s:wipebuf)) == 0 && getbufvar(s:wipebuf, '&buftype') isnot# 'terminal'
   silent exe 'bwipe ' . s:wipebuf

@@ -2,10 +2,11 @@
 
 local builtin = require 'telescope.builtin'
 vim.keymap.set('n', '<leader>bb', builtin.buffers, { desc = 'Find existing buffers' })
+vim.keymap.set('n', '<M-e>', builtin.buffers, { desc = 'Find existing buffers' })
 vim.keymap.set('n', '<leader>bd', '<cmd>bdelete<cr>', { silent = true, noremap = true })
 
-vim.keymap.set('n', '<C-L>', '<cmd>bnext<cr>', { silent = true, noremap = true })
-vim.keymap.set('n', '<C-H>', '<cmd>bprevious<cr>', { silent = true, noremap = true })
+vim.keymap.set('n', '<C-]>', '<cmd>bnext<cr>', { silent = true, noremap = true })
+vim.keymap.set('n', '<C-[>', '<cmd>bprevious<cr>', { silent = true, noremap = true })
 
 return {
   'akinsho/bufferline.nvim',
