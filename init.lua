@@ -169,6 +169,36 @@ vim.keymap.set('x', 'p', 'P', { desc = 'Paste without replacing the yank registe
 vim.keymap.set({ 'n', 'x' }, 'x', '"_x', { desc = 'Delete without replacing the yank register' })
 vim.keymap.set({ 'n', 'x' }, 'c', '"_c', { desc = 'Change without replacing the yank register' })
 
+-- Copy the current file's path, using the directory Neovim was launched from
+-- as the project root even if the working directory changes later.
+local launch_dir = vim.uv.cwd()
+
+local function copy_file_path(relative)
+  local full_path = vim.api.nvim_buf_get_name(0)
+  if full_path == '' then
+    vim.notify('Current buffer has no file path', vim.log.levels.WARN)
+    return
+  end
+
+  full_path = vim.fs.normalize(full_path)
+  local project_path = relative and vim.fs.relpath(launch_dir, full_path)
+  local path = project_path or full_path
+  local path_type = project_path and 'project' or 'full'
+  vim.fn.setreg('+', path)
+  vim.notify(string.format('Copied %s path: %s', path_type, path))
+end
+
+vim.api.nvim_create_user_command('CopyProjectPath', function()
+  copy_file_path(true)
+end, { desc = 'Copy current file path relative to Neovim launch directory' })
+
+vim.api.nvim_create_user_command('CopyFullPath', function()
+  copy_file_path(false)
+end, { desc = 'Copy current file absolute path' })
+
+vim.keymap.set('n', '<leader>yp', '<cmd>CopyProjectPath<CR>', { desc = '[Y]ank project-relative file [P]ath' })
+vim.keymap.set('n', '<leader>yP', '<cmd>CopyFullPath<CR>', { desc = '[Y]ank full file [P]ath' })
+
 -- Diagnostic keymaps
 vim.keymap.set('n', '[d', vim.diagnostic.goto_prev, { desc = 'Go to previous [D]iagnostic message' })
 vim.keymap.set('n', ']d', vim.diagnostic.goto_next, { desc = 'Go to next [D]iagnostic message' })
