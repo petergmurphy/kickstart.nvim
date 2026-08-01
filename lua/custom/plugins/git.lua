@@ -103,6 +103,113 @@ local function open_line_commit_split()
   require('neogit.buffers.commit_view').new(commit):open 'vsplit'
 end
 
+local function open_commit_history(line_range)
+  local file = vim.api.nvim_buf_get_name(0)
+
+  if file == '' then
+    vim.notify('No file for current buffer', vim.log.levels.WARN)
+    return
+  end
+
+  local root_lines, root_error = system_lines { 'git', '-C', vim.fs.dirname(file), 'rev-parse', '--show-toplevel' }
+
+  if not root_lines then
+    vim.notify('Could not find repository for current file: ' .. root_error, vim.log.levels.ERROR)
+    return
+  end
+
+  local root = root_lines[1]
+  local relative_file = vim.fs.relpath(root, file)
+  local log_cmd = {
+    'git',
+    '-C',
+    root,
+    'log',
+    '--no-patch',
+    '--date=short',
+    '--format=%H%x1f%h%x1f%ad%x1f%an%x1f%s',
+  }
+
+  if line_range then
+    vim.list_extend(log_cmd, {
+      '-L',
+      string.format('%d,%d:%s', line_range.first, line_range.last, relative_file),
+    })
+  else
+    vim.list_extend(log_cmd, { '--follow', '--', relative_file })
+  end
+
+  local lines, git_error = system_lines(log_cmd)
+
+  if not lines then
+    vim.notify('Could not read commit history: ' .. git_error, vim.log.levels.ERROR)
+    return
+  end
+
+  local commits = vim
+    .iter(lines)
+    :map(function(line)
+      local fields = vim.split(line, '\31', { plain = true })
+
+      return {
+        hash = fields[1],
+        label = string.format('%s  %s  %s  %s', fields[2], fields[3], fields[4], fields[5]),
+      }
+    end)
+    :totable()
+
+  if vim.tbl_isempty(commits) then
+    vim.notify('No commits found', vim.log.levels.INFO)
+    return
+  end
+
+  local actions = require 'telescope.actions'
+  local action_state = require 'telescope.actions.state'
+  local conf = require('telescope.config').values
+  local finders = require 'telescope.finders'
+  local pickers = require 'telescope.pickers'
+  local previewers = require 'telescope.previewers'
+  local prompt_title = line_range
+      and string.format('History for %s lines %d-%d', relative_file, line_range.first, line_range.last)
+    or 'History for ' .. relative_file
+
+  pickers
+    .new({ cwd = root }, {
+      prompt_title = prompt_title,
+      finder = finders.new_table {
+        results = commits,
+        entry_maker = function(commit)
+          return {
+            value = commit.hash,
+            display = commit.label,
+            ordinal = commit.hash .. ' ' .. commit.label,
+          }
+        end,
+      },
+      previewer = previewers.git_commit_diff_to_parent.new {
+        cwd = root,
+        current_file = relative_file,
+      },
+      sorter = conf.generic_sorter {},
+      attach_mappings = function(prompt_bufnr)
+        actions.select_default:replace(function()
+          local selection = action_state.get_selected_entry()
+          actions.close(prompt_bufnr)
+
+          if not selection then
+            return
+          end
+
+          require('neogit.lib.git.repository').instance(root)
+          require('neogit.buffers.commit_view').new(selection.value):open 'vsplit'
+        end)
+
+        return true
+      end,
+    })
+    :find()
+end
+
 return {
   {
     'tpope/vim-fugitive',
@@ -161,6 +268,43 @@ return {
         end,
         desc = 'Open git commit log',
       },
+      {
+        '<leader>gh',
+        open_commit_history,
+        desc = 'Select from current file history',
+      },
+      {
+        '<leader>gh',
+        function()
+          local first = vim.fn.line 'v'
+          local last = vim.fn.line '.'
+
+          open_commit_history {
+            first = math.min(first, last),
+            last = math.max(first, last),
+          }
+        end,
+        mode = 'x',
+        desc = 'Select from selected lines history',
+      },
+    },
+  },
+  {
+    'akinsho/git-conflict.nvim',
+    version = '*',
+    event = 'BufReadPost',
+    opts = {
+      default_mappings = false,
+      disable_diagnostics = true,
+    },
+    keys = {
+      { '<leader>gco', '<cmd>GitConflictChooseOurs<cr>', desc = 'Choose our conflict changes' },
+      { '<leader>gct', '<cmd>GitConflictChooseTheirs<cr>', desc = 'Choose their conflict changes' },
+      { '<leader>gcb', '<cmd>GitConflictChooseBoth<cr>', desc = 'Choose both conflict changes' },
+      { '<leader>gc0', '<cmd>GitConflictChooseNone<cr>', desc = 'Choose neither conflict changes' },
+      { '<leader>gcl', '<cmd>GitConflictListQf<cr>', desc = 'List Git conflicts' },
+      { '[x', '<cmd>GitConflictPrevConflict<cr>', desc = 'Previous Git conflict' },
+      { ']x', '<cmd>GitConflictNextConflict<cr>', desc = 'Next Git conflict' },
     },
   },
 }

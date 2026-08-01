@@ -121,6 +121,12 @@ vim.opt.clipboard = 'unnamedplus'
 -- Enable break indent
 vim.opt.breakindent = true
 
+-- Use two spaces for indentation by default.
+vim.opt.expandtab = true
+vim.opt.tabstop = 2
+vim.opt.softtabstop = 2
+vim.opt.shiftwidth = 2
+
 -- Save undo history
 vim.opt.undofile = true
 
@@ -146,7 +152,7 @@ vim.opt.splitbelow = true
 --  See `:help 'list'`
 --  and `:help 'listchars'`
 vim.opt.list = true
-vim.opt.listchars = { tab = '» ', trail = '·', nbsp = '␣' }
+vim.opt.listchars = { tab = '│ ', trail = '·', nbsp = '␣' }
 
 -- Preview substitutions live, as you type!
 vim.opt.inccommand = 'split'
@@ -168,6 +174,7 @@ vim.keymap.set('n', '<Esc>', '<cmd>nohlsearch<CR>')
 vim.keymap.set('x', 'p', 'P', { desc = 'Paste without replacing the yank register' })
 vim.keymap.set({ 'n', 'x' }, 'x', '"_x', { desc = 'Delete without replacing the yank register' })
 vim.keymap.set({ 'n', 'x' }, 'c', '"_c', { desc = 'Change without replacing the yank register' })
+vim.keymap.set('x', 'y', 'ygv', { desc = 'Yank and keep the visual selection' })
 
 -- Copy the current file's path, using the directory Neovim was launched from
 -- as the project root even if the working directory changes later.
@@ -333,6 +340,7 @@ require('lazy').setup({
         { '<leader>f', group = '[F]ind' },
         { '<leader>f_', hidden = true },
         { '<leader>g', group = '[G]it' },
+        { '<leader>gc', group = '[C]onflicts' },
         { '<leader>g_', hidden = true },
         { '<leader>r', group = '[R]ename' },
         { '<leader>r_', hidden = true },
@@ -399,11 +407,12 @@ require('lazy').setup({
         -- You can put your default mappings / updates / etc. in here
         --  All the info you're looking for is in `:help telescope.setup()`
         --
-        -- defaults = {
-        --   mappings = {
-        --     i = { ['<c-enter>'] = 'to_fuzzy_refine' },
-        --   },
-        -- },
+        defaults = {
+          path_display = { truncate = 1 },
+          -- mappings = {
+          --   i = { ['<c-enter>'] = 'to_fuzzy_refine' },
+          -- },
+        },
         -- pickers = {}
         extensions = {
           ['ui-select'] = {
@@ -523,7 +532,21 @@ require('lazy').setup({
           find_command = { 'rg', '--files', '--hidden', '--follow', '--no-ignore', '-g', '!.git' },
         }
       end, { desc = '[F]ind [A]ll files' })
-      vim.keymap.set('n', '<leader><leader>', builtin.find_files, { desc = 'Find Files' })
+      vim.keymap.set('n', '<leader><leader>', function()
+        builtin.find_files {
+          find_command = {
+            'rg',
+            '--files',
+            '--hidden',
+            '--follow',
+            '--no-ignore',
+            '-g',
+            '!**/.git/**',
+            '-g',
+            '!**/node_modules/**',
+          },
+        }
+      end, { desc = 'Find Files (including hidden and ignored)' })
       vim.keymap.set('n', '<leader>fs', builtin.builtin, { desc = '[F]ind [S]elect Telescope' })
       vim.keymap.set('n', '<leader>fw', builtin.grep_string, { desc = '[F]ind current [W]ord' })
       vim.keymap.set('v', 'g/', function()
@@ -922,6 +945,51 @@ require('lazy').setup({
     'rebelot/kanagawa.nvim',
     priority = 1000, -- Make sure to load this before all the other start plugins.
     init = function()
+      require('kanagawa').setup {
+        transparent = true,
+        overrides = function()
+          local transparent = { bg = 'NONE' }
+
+          return {
+            -- Editor background and gutters.
+            Normal = transparent,
+            NormalNC = transparent,
+            LineNr = transparent,
+            LineNrAbove = transparent,
+            LineNrBelow = transparent,
+            CursorLineNr = transparent,
+            CursorLineSign = transparent,
+            CursorLineFold = transparent,
+            SignColumn = transparent,
+            FoldColumn = transparent,
+
+            -- Window headers, tab lines, and floating windows.
+            StatusLine = transparent,
+            StatusLineNC = transparent,
+            TabLine = transparent,
+            TabLineFill = transparent,
+            TabLineSel = transparent,
+            WinBar = transparent,
+            WinBarNC = transparent,
+            NormalFloat = transparent,
+            FloatBorder = transparent,
+            FloatTitle = transparent,
+
+            -- mini.nvim's tab and status line backgrounds.
+            MiniTablineCurrent = transparent,
+            MiniTablineVisible = transparent,
+            MiniTablineHidden = transparent,
+            MiniTablineModifiedCurrent = transparent,
+            MiniTablineModifiedVisible = transparent,
+            MiniTablineModifiedHidden = transparent,
+            MiniTablineTabpagesection = transparent,
+            MiniStatuslineFilename = transparent,
+            MiniStatuslineFileinfo = transparent,
+            MiniStatuslineDevinfo = transparent,
+          }
+        end,
+      }
+
       -- Load the colorscheme here.
       -- Like many other themes, this one has different styles, and you could load
       -- any other, such as 'tokyonight-storm', 'tokyonight-moon', or 'tokyonight-day'.
