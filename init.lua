@@ -409,6 +409,10 @@ require('lazy').setup({
         --
         defaults = {
           path_display = { truncate = 1 },
+          cache_picker = {
+            num_pickers = 20,
+            limit_entries = 1000,
+          },
           -- mappings = {
           --   i = { ['<c-enter>'] = 'to_fuzzy_refine' },
           -- },
@@ -431,8 +435,59 @@ require('lazy').setup({
       local make_entry = require 'telescope.make_entry'
       local pickers = require 'telescope.pickers'
       local sorters = require 'telescope.sorters'
+      local telescope_state = require 'telescope.state'
       local telescope_conf = require('telescope.config').values
       local telescope_utils = require 'telescope.utils'
+
+      local picker_expiry_ms = 10 * 60 * 1000
+      local picker_last_closed = {}
+
+      local function track_picker_close(picker_id, opts)
+        opts = opts or {}
+        local existing_attach_mappings = opts.attach_mappings
+
+        opts.attach_mappings = function(prompt_bufnr, map)
+          vim.api.nvim_create_autocmd('BufWipeout', {
+            buffer = prompt_bufnr,
+            once = true,
+            callback = function()
+              picker_last_closed[picker_id] = vim.uv.now()
+            end,
+          })
+
+          if existing_attach_mappings then
+            return existing_attach_mappings(prompt_bufnr, map)
+          end
+          return true
+        end
+
+        return opts
+      end
+
+      local function reopen_or_start(picker_id, open_picker)
+        return function()
+          local cached_pickers = telescope_state.get_global_key 'cached_pickers' or {}
+          local last_closed = picker_last_closed[picker_id]
+
+          if last_closed and vim.uv.now() - last_closed <= picker_expiry_ms then
+            for index, picker in ipairs(cached_pickers) do
+              if picker.prompt_title == picker_id then
+                builtin.resume { cache_index = index }
+                return
+              end
+            end
+          end
+
+          picker_last_closed[picker_id] = nil
+          for index = #cached_pickers, 1, -1 do
+            if cached_pickers[index].prompt_title == picker_id then
+              table.remove(cached_pickers, index)
+            end
+          end
+          telescope_state.set_global_key('cached_pickers', cached_pickers)
+          open_picker(track_picker_close(picker_id, { prompt_title = picker_id }))
+        end
+      end
 
       local function get_visual_selection()
         return table.concat(vim.fn.getregion(vim.fn.getpos 'v', vim.fn.getpos '.', { type = vim.fn.mode() }), '\n')
@@ -519,52 +574,59 @@ require('lazy').setup({
       end
 
       -- Search only non-gitignored files
-      vim.keymap.set('n', '<leader>ff', function()
-        builtin.find_files {
-          find_command = { 'rg', '--files', '--hidden', '--follow', '-g', '!.git' },
-        }
-      end, { desc = '[F]ind [F]iles (respects .gitignore)' })
+      vim.keymap.set('n', '<leader>ff', reopen_or_start('Find Files', function(opts)
+        opts.find_command = { 'rg', '--files', '--hidden', '--follow', '-g', '!.git' }
+        builtin.find_files(opts)
+      end), { desc = '[F]ind [F]iles (respects .gitignore)' })
 
-      vim.keymap.set('n', '<leader>fh', builtin.help_tags, { desc = '[F]ind [H]elp' })
-      vim.keymap.set('n', '<leader>fk', builtin.keymaps, { desc = '[F]ind [K]eymaps' })
-      vim.keymap.set('n', '<leader>fa', function()
-        builtin.find_files {
-          find_command = { 'rg', '--files', '--hidden', '--follow', '--no-ignore', '-g', '!.git' },
+      vim.keymap.set('n', '<leader>fh', reopen_or_start('Find Help', function(opts)
+        builtin.help_tags(opts)
+      end), { desc = '[F]ind [H]elp' })
+      vim.keymap.set('n', '<leader>fk', reopen_or_start('Find Keymaps', function(opts)
+        builtin.keymaps(opts)
+      end), { desc = '[F]ind [K]eymaps' })
+      vim.keymap.set('n', '<leader>fa', reopen_or_start('Find All Files', function(opts)
+        opts.find_command = { 'rg', '--files', '--hidden', '--follow', '--no-ignore', '-g', '!.git' }
+        builtin.find_files(opts)
+      end), { desc = '[F]ind [A]ll files' })
+      vim.keymap.set('n', '<leader><leader>', reopen_or_start('Find Files (Hidden and Ignored)', function(opts)
+        opts.find_command = {
+          'rg',
+          '--files',
+          '--hidden',
+          '--follow',
+          '--no-ignore',
+          '-g',
+          '!**/.git/**',
+          '-g',
+          '!**/node_modules/**',
         }
-      end, { desc = '[F]ind [A]ll files' })
-      vim.keymap.set('n', '<leader><leader>', function()
-        builtin.find_files {
-          find_command = {
-            'rg',
-            '--files',
-            '--hidden',
-            '--follow',
-            '--no-ignore',
-            '-g',
-            '!**/.git/**',
-            '-g',
-            '!**/node_modules/**',
-          },
-        }
-      end, { desc = 'Find Files (including hidden and ignored)' })
+        builtin.find_files(opts)
+      end), { desc = 'Find Files (including hidden and ignored)' })
       vim.keymap.set('n', '<leader>fs', builtin.builtin, { desc = '[F]ind [S]elect Telescope' })
-      vim.keymap.set('n', '<leader>fw', builtin.grep_string, { desc = '[F]ind current [W]ord' })
+      vim.keymap.set('n', '<leader>fw', reopen_or_start('Find Current Word', function(opts)
+        builtin.grep_string(opts)
+      end), { desc = '[F]ind current [W]ord' })
       vim.keymap.set('v', 'g/', function()
         builtin.grep_string { search = get_visual_selection() }
       end, { desc = 'Find selected text globally' })
-      vim.keymap.set('n', '<leader>fg', builtin.live_grep, { desc = '[F]ind by [G]rep' })
-      vim.keymap.set('n', '<leader>fc', function()
-        lsp_workspace_symbol_search {
-          prompt_title = 'Find Classes / Types',
-          symbols = { 'class', 'interface', 'struct', 'enum', 'typeParameter' },
-        }
-      end, { desc = '[F]ind [C]lasses / Types' })
-      vim.keymap.set('n', '<leader>fS', function()
-        lsp_workspace_symbol_search { prompt_title = 'Find Workspace Symbols' }
-      end, { desc = '[F]ind Workspace [S]ymbols' })
-      vim.keymap.set('n', '<leader>fd', builtin.diagnostics, { desc = '[F]ind [D]iagnostics' })
+      vim.keymap.set('n', '<leader>fg', reopen_or_start('Find by Grep', function(opts)
+        builtin.live_grep(opts)
+      end), { desc = '[F]ind by [G]rep' })
+      vim.keymap.set('n', '<leader>fc', reopen_or_start('Find Classes / Types', function(opts)
+        opts.symbols = { 'class', 'interface', 'struct', 'enum', 'typeParameter' }
+        lsp_workspace_symbol_search(opts)
+      end), { desc = '[F]ind [C]lasses / Types' })
+      vim.keymap.set('n', '<leader>fS', reopen_or_start('Find Workspace Symbols', function(opts)
+        lsp_workspace_symbol_search(opts)
+      end), { desc = '[F]ind Workspace [S]ymbols' })
+      vim.keymap.set('n', '<leader>fd', reopen_or_start('Find Diagnostics', function(opts)
+        builtin.diagnostics(opts)
+      end), { desc = '[F]ind [D]iagnostics' })
       vim.keymap.set('n', '<leader>fr', builtin.resume, { desc = '[F]ind [R]esume' })
-      vim.keymap.set('n', '<leader>f.', builtin.oldfiles, { desc = '[F]ind Recent Files ("." for repeat)' })
+      vim.keymap.set('n', '<leader>f.', reopen_or_start('Find Recent Files', function(opts)
+        builtin.oldfiles(opts)
+      end), { desc = '[F]ind Recent Files ("." for repeat)' })
 
       -- Slightly advanced example of overriding default behavior and theme
       vim.keymap.set('n', '<leader>/', function()
@@ -577,17 +639,16 @@ require('lazy').setup({
 
       -- It's also possible to pass additional configuration options.
       --  See `:help telescope.builtin.live_grep()` for information about particular keys
-      vim.keymap.set('n', '<leader>f/', function()
-        builtin.live_grep {
-          grep_open_files = true,
-          prompt_title = 'Live Grep in Open Files',
-        }
-      end, { desc = '[F]ind [/] in Open Files' })
+      vim.keymap.set('n', '<leader>f/', reopen_or_start('Find in Open Files', function(opts)
+        opts.grep_open_files = true
+        builtin.live_grep(opts)
+      end), { desc = '[F]ind [/] in Open Files' })
 
       -- Shortcut for searching your Neovim configuration files
-      vim.keymap.set('n', '<leader>fn', function()
-        builtin.find_files { cwd = vim.fn.stdpath 'config' }
-      end, { desc = '[F]ind [N]eovim files' })
+      vim.keymap.set('n', '<leader>fn', reopen_or_start('Find Neovim Files', function(opts)
+        opts.cwd = vim.fn.stdpath 'config'
+        builtin.find_files(opts)
+      end), { desc = '[F]ind [N]eovim files' })
     end,
   },
 
