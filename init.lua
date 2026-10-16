@@ -105,7 +105,7 @@ vim.opt.clipboard = 'unnamedplus'
 vim.opt.number = true
 -- You can also add relative line numbers, to help with jumping.
 --  Experiment for yourself to see if you like it!
--- vim.opt.relativenumber = true
+vim.opt.relativenumber = true
 
 -- Enable mouse mode, can be useful for resizing splits for example!
 vim.opt.mouse = 'a'
@@ -175,6 +175,7 @@ vim.keymap.set('x', 'p', 'P', { desc = 'Paste without replacing the yank registe
 vim.keymap.set({ 'n', 'x' }, 'x', '"_x', { desc = 'Delete without replacing the yank register' })
 vim.keymap.set({ 'n', 'x' }, 'c', '"_c', { desc = 'Change without replacing the yank register' })
 vim.keymap.set('x', 'y', 'ygv', { desc = 'Yank and keep the visual selection' })
+vim.keymap.set('n', '<leader>cj', ":%!jq '.'<CR>", { desc = '[C]ode format [J]SON with jq' })
 
 -- Copy the current file's path, using the directory Neovim was launched from
 -- as the project root even if the working directory changes later.
@@ -329,7 +330,14 @@ require('lazy').setup({
     'folke/which-key.nvim',
     event = 'VimEnter', -- Sets the loading event to 'VimEnter'
     config = function() -- This is the function that runs, AFTER loading
-      require('which-key').setup()
+      require('which-key').setup {
+        triggers = {
+          { '<auto>', mode = 'nxso' },
+          -- `g` is a built-in prefix, so which-key will not create this
+          -- trigger automatically. Show `g/` while a selection is active.
+          { 'g', mode = 'v' },
+        },
+      }
 
       -- Document existing key chains
       require('which-key').add {
@@ -408,7 +416,18 @@ require('lazy').setup({
         --  All the info you're looking for is in `:help telescope.setup()`
         --
         defaults = {
-          path_display = { truncate = 1 },
+          -- Keep the filename (especially extensions such as `.test.ts`) visible
+          -- when long parent directories exceed the results window width.
+          path_display = function(_, path)
+            local filename = require('telescope.utils').path_tail(path)
+            local parent = vim.fs.dirname(path)
+
+            if parent == '.' then
+              return filename
+            end
+
+            return string.format('%s — %s', filename, parent)
+          end,
           cache_picker = {
             num_pickers = 20,
             limit_entries = 1000,
@@ -438,6 +457,7 @@ require('lazy').setup({
       local telescope_state = require 'telescope.state'
       local telescope_conf = require('telescope.config').values
       local telescope_utils = require 'telescope.utils'
+      local lsp_symbols = require 'custom.lsp_symbols'
 
       local picker_expiry_ms = 10 * 60 * 1000
       local picker_last_closed = {}
@@ -557,6 +577,7 @@ require('lazy').setup({
                     bufnr,
                     client.offset_encoding or 'utf-16'
                   ) or {}
+                  lsp_symbols.normalize_typescript_type_aliases(response and response.result or {}, items)
                   vim.list_extend(symbols, items)
                 end
 
@@ -614,7 +635,7 @@ require('lazy').setup({
         builtin.live_grep(opts)
       end), { desc = '[F]ind by [G]rep' })
       vim.keymap.set('n', '<leader>fc', reopen_or_start('Find Classes / Types', function(opts)
-        opts.symbols = { 'class', 'interface', 'struct', 'enum', 'typeParameter' }
+        opts.symbols = { 'class', 'interface', 'struct', 'enum', 'typeParameter', 'typeAlias' }
         lsp_workspace_symbol_search(opts)
       end), { desc = '[F]ind [C]lasses / Types' })
       vim.keymap.set('n', '<leader>fS', reopen_or_start('Find Workspace Symbols', function(opts)
